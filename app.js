@@ -1,61 +1,62 @@
 /* ================== CONFIG ================== */
 const SHEET_ID = '1LlYHlVBqT-ju6ZuG3VrqceBOjqWuW41qYhSWbEEzNCE';
 const SHEET_NAME = 'data';
-// Column mapping note - Demo version with actual data:
-// A: Timestamp, B: Device, C: DevEUI, D: EC, E: TDS, F: RSSI, G: SNR
-// For demo: showing only EC and TDS with real data, other parameters set to 0
-const COLS = { ts: 0, device: 1, devEui: 2, ec: 3, tds: 4, rssi: 5, snr: 6 };
+// Column mapping note:
+// A: Timestamp, B: Device, C: DevEUI, D: EC, E: pH, F: N, G: P, H: K, I: MOI, J: RSSI, K: SNR, L: VBAT_mV (legacy), M: VBAT_percent (current)
+// We now use ONLY column M (index 12 after zero-based) for battery percentage.
+const COLS = { ts: 0, device: 1, devEui: 2, ec: 3, ph: 4, n: 5, p: 6, k: 7, moi: 8, rssi: 9, snr: 10, batPercent: 12 };
 
 /* ================== Unit Conversion Functions ================== */
-// Water quality parameter conversion functions
-// These functions handle unit conversions and data validation for water monitoring sensors
+// แปลง mg/L เป็น ppm สำหรับข้อมูลดิน
+// เซ็นเซอร์วัดธาตุที่ละลายได้ (Available form) ≠ ธาตุรวมในดิน (Total content)
+// ต้องใช้ conversion factor เพื่อให้เทียบเคียงกับค่าห้องแลป
 
-// Convert and validate water quality parameters
-function validateWaterParam(value, min = null, max = null) {
-  if (value === null || value === undefined || isNaN(value)) return null;
-  const num = Number(value);
-  if (!Number.isFinite(num)) return null;
+// Conversion factors จากการเทียบค่าเซ็นเซอร์กับห้องแลป
+// ค่าเหล่านี้ควรปรับตามการ calibration จริงในแต่ละพื้นที่
+const SOIL_CONVERSION_FACTORS = {
+  N: 1.0,   // N เซ็นเซอร์ x 8 ≈ N ห้องแลป (ปรับได้)
+  P: 1.0,  // P เซ็นเซอร์ x 12 ≈ P ห้องแลป (ปรับได้) 
+  K: 1.0   // K เซ็นเซอร์ x 15 ≈ K ห้องแลป (ปรับได้)
+};
+
+function mgLtoPPM(mgLValue, nutrient = 'N') {
+  if (mgLValue === null || mgLValue === undefined || isNaN(mgLValue)) return null;
   
-  // Apply min/max constraints if provided
-  if (min !== null && num < min) return min;
-  if (max !== null && num > max) return max;
+  // แปลง mg/L (Available form) เป็น equivalent ppm (Total content)
+  const factor = SOIL_CONVERSION_FACTORS[nutrient] || 1.0;
+  const ppmValue = mgLValue * factor;
   
-  return Math.round(num * 100) / 100; // Round to 2 decimal places
+  return Math.round(ppmValue * 10) / 10; // ปัดเศษ 1 ทศนิยม
 }
 
-// pH: typically 0-14 range
-function validatePH(phValue) {
-  return validateWaterParam(phValue, 0, 14);
+// ฟังก์ชันสำหรับปรับ conversion factors (ใช้เมื่อมีข้อมูล calibration ใหม่)
+function updateConversionFactor(nutrient, newFactor) {
+  if (SOIL_CONVERSION_FACTORS.hasOwnProperty(nutrient)) {
+    SOIL_CONVERSION_FACTORS[nutrient] = newFactor;
+    console.log(`Updated ${nutrient} conversion factor to ${newFactor}`);
+  }
 }
 
-// EC: Electrical Conductivity in µS/cm
-function validateEC(ecValue) {
-  return validateWaterParam(ecValue, 0, 100000); // 0-100,000 µS/cm range
-}
-
-// DO: Dissolved Oxygen in mg/L
-function validateDO(doValue) {
-  return validateWaterParam(doValue, 0, 50); // 0-50 mg/L typical range
-}
-
-// ORP: Oxidation-Reduction Potential in mV
-function validateORP(orpValue) {
-  return validateWaterParam(orpValue, -2000, 2000); // ±2000 mV range
-}
-
-// Turbidity: in NTU (Nephelometric Turbidity Units)
-function validateTurbidity(turbidityValue) {
-  return validateWaterParam(turbidityValue, 0, 4000); // 0-4000 NTU range
-}
-
-// TDS: Total Dissolved Solids in ppm
-function validateTDS(tdsValue) {
-  return validateWaterParam(tdsValue, 0, 50000); // 0-50,000 ppm range
-}
-
-// Temperature: in Celsius
-function validateTemp(tempValue) {
-  return validateWaterParam(tempValue, -50, 150); // -50°C to 150°C range
+// แปลง EC จาก µS/cm เป็น ppm (ถ้าข้อมูลเป็น µS/cm)
+// หรือจาก mV เป็น ppm (ถ้าข้อมูลยังเป็น mV)
+function ecToPPM(ecValue) {
+  if (ecValue === null || ecValue === undefined || isNaN(ecValue)) return null;
+  
+  // ถ้าค่า EC อยู่ในช่วง mV (0-5000) ให้แปลงเป็น ppm
+  if (ecValue < 10000) {
+    // สูตรแปลงจาก mV เป็น ppm (ปรับตามเซ็นเซอร์ที่ใช้)
+    const EC_SLOPE = 0.001;  // ปรับตามเซ็นเซอร์
+    const EC_OFFSET = 0.0;   // ปรับตามเซ็นเซอร์  
+    const EC_TO_PPM = 640;   // ค่าแปลง EC(mS/cm) เป็น ppm (ประมาณ)
+    
+    const ec_mScm = ecValue * EC_SLOPE + EC_OFFSET;
+    const ppm = ec_mScm * EC_TO_PPM;
+    return Math.max(0, Math.min(65535, ppm));
+  }
+  
+  // ถ้าค่า EC อยู่ในช่วง µS/cm แล้ว ให้แปลงเป็น ppm
+  // โดยทั่วไป: ppm ≈ EC(µS/cm) × 0.64
+  return ecValue * 0.64;
 }
 
 /* ================== Helpers ================== */
@@ -67,8 +68,8 @@ function gvizURL({ limit = 100, startDate = null, endDate = null, device = null 
   if (device) where.push(`B = ${sqlQuote(device)}`);
   const whereClause = where.length ? ` where ${where.join(' and ')}` : '';
   const limitClause = (limit && Number.isFinite(limit)) ? ` limit ${limit}` : '';
-  // Select demo columns: A-G (Timestamp, Device, DevEUI, EC, TDS, RSSI, SNR)
-  const query = `select A,B,C,D,E,F,G${whereClause} order by A desc${limitClause}`;
+  // Select includes column M (VBAT_percent). Column L (mV) kept only for historical rows but not used now.
+  const query = `select A,B,C,D,E,F,G,H,I,J,K,L,M${whereClause} order by A desc${limitClause}`;
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(SHEET_NAME)}&tqx=out:json&tq=${encodeURIComponent(query)}`;
 }
 function parseGviz(text) {
@@ -117,17 +118,24 @@ const REFRESH_SEC = 10;
 const startDateFilter = document.getElementById('startDateFilter');
 const endDateFilter = document.getElementById('endDateFilter');
 const elUpdated = document.getElementById('updated');
-const elPH = document.getElementById('ph'); const elEC = document.getElementById('ec');
-const elDO = document.getElementById('do'); const elORP = document.getElementById('orp');
-const elTurbidity = document.getElementById('turbidity'); const elTDS = document.getElementById('tds');
-const elTemp = document.getElementById('temp');
+const elEC = document.getElementById('ec'); const elPH = document.getElementById('ph');
+const elN = document.getElementById('n'); const elP = document.getElementById('p'); const elK = document.getElementById('k');
+const elMOI = document.getElementById('moi');
+// Header battery icon elements
+const elBAT = document.getElementById('bat');
+const elBatFill = document.getElementById('batteryFill');
+// KPI numeric-only battery value
+const elBatteryValue = document.getElementById('batteryValue');
 const elRSSI = document.getElementById('rssi'); const elSNR = document.getElementById('snr'); const elDev = document.getElementById('dev');
 const summaryGrid = document.getElementById('summaryGrid');
 const tbody = document.getElementById('tableBody');
+// Advisor device controls
+const elAdvisorDeviceName = document.getElementById('advisorDeviceName');
+const ddAdvisorDevice = document.getElementById('advisorDevice');
 
 /* ================== Theme ================== */
 function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'light'; }
-function setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('water-quality-theme', theme); applyChartTheme(theme); updateThemeIcon(theme); }
+function setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('smfarm-theme', theme); applyChartTheme(theme); updateThemeIcon(theme); }
 function updateThemeIcon(theme) {
   const mainBtn = document.getElementById('themeToggle');
   const mobBtn = document.getElementById('themeToggleMobile');
@@ -141,15 +149,15 @@ function applyChartTheme(theme) { if (!CHART) return; const legendColor = theme 
 async function fetchSheet({ limit, startDate, endDate, device } = {}) {
   const res = await fetch(gvizURL({ limit, startDate, endDate, device }), { cache: 'no-store' }); const text = await res.text(); const { rows } = parseGviz(text); cache = rows.map(r => ({
     ts: parseDateToken(r[0]), device: r[1] ?? '', devEui: r[2] ?? '', 
-    // Demo version: Only EC and TDS have real data, others set to 0
-    ph: 0,  // Set to 0 for demo
-    ec: validateEC(toNum(r[3])) || 0,  // Column D - Real EC data
-    do: 0,  // Set to 0 for demo
-    orp: 0,  // Set to 0 for demo
-    turbidity: 0,  // Set to 0 for demo
-    tds: validateTDS(toNum(r[4])) || 0,  // Column E - Real TDS data
-    temp: 0,  // Set to 0 for demo
-    rssi: toNum(r[5]) || 0, snr: toNum(r[6]) || 0,  // RSSI and SNR from columns F, G
+    // แปลงค่าเป็น ppm (สำหรับข้อมูลดิน)
+    ec: ecToPPM(toNum(r[3])), 
+    ph: toNum(r[4]),  // pH ไม่ต้องแปลง
+    n: mgLtoPPM(toNum(r[5]), 'N'),   // N: mg/L → ppm (Available → Total equivalent)
+    p: mgLtoPPM(toNum(r[6]), 'P'),   // P: mg/L → ppm (Available → Total equivalent)
+    k: mgLtoPPM(toNum(r[7]), 'K'),   // K: mg/L → ppm (Available → Total equivalent)
+    moi: toNum(r[8]), rssi: toNum(r[9]), snr: toNum(r[10]),
+    // Battery percent strictly from column M (r[12]); ignore column L (mV). If missing, value will be null.
+    bat: toNum(r[12]),
   })); elUpdated.textContent = 'updated ' + (cache[0] ? fmtTime(cache[0].ts) : '-');
   const devices = uniq(cache.map(d => d.device).filter(Boolean));
   // Sort devices by name first, then by number
@@ -182,50 +190,82 @@ async function fetchSheet({ limit, startDate, endDate, device } = {}) {
     const currentExportDevice = exportDeviceSelect.value;
     exportDeviceSelect.innerHTML = `<option value="">ทั้งหมด (${devices.length})</option>` + devices.map(x => `<option ${x === currentExportDevice ? 'selected' : ''} value="${x}">${x}</option>`).join('');
   }
+  // Populate advisor device selector (independent, default to latest device if empty)
+  if (ddAdvisorDevice) {
+    const advSelected = ddAdvisorDevice.value || latestDev;
+    ddAdvisorDevice.innerHTML = `<option value="">ทั้งหมด (${devices.length})</option>` + devices.map(x => `<option ${x === advSelected ? 'selected' : ''} value="${x}">${x}</option>`).join('');
+    ddAdvisorDevice.value = advSelected;
+  }
 }
 function filterRows(deviceOverride = null) { const device = deviceOverride != null ? deviceOverride : ddDevice.value; const startDate = startDateFilter.value; const endDate = endDateFilter.value; let filtered = cache.slice(); if (device) filtered = filtered.filter(r => r.device === device); if (startDate || endDate) { filtered = filtered.filter(r => { if (!r.ts) return false; const rowDate = dayjs(r.ts).format('YYYY-MM-DD'); if (startDate && rowDate < startDate) return false; if (endDate && rowDate > endDate) return false; return true; }); } return filtered; }
 function updateKPIs(latest) {
   const NIL = '–';
   if (!latest) {
-    [elPH, elEC, elDO, elORP, elTurbidity, elTDS, elTemp].forEach(el => el.textContent = NIL);
+    [elEC, elPH, elN, elP, elK, elMOI].forEach(el => el.textContent = NIL);
+    if (elBAT) elBAT.textContent = NIL;
+    if (elBatteryValue) elBatteryValue.textContent = NIL;
     elRSSI.textContent = elSNR.textContent = elDev.textContent = NIL;
+    if (elBatFill) { elBatFill.style.width = '0%'; elBatFill.className = 'battery-fill missing'; }
     return;
   }
-  // Demo version: Show real EC and TDS data, others as 0
-  elPH.textContent = '0.00';  // Demo: Always show 0
-  elEC.textContent = latest.ec != null && latest.ec > 0 ? latest.ec.toFixed(0) : '0';  // Real EC data
-  elDO.textContent = '0.00';  // Demo: Always show 0
-  elORP.textContent = '0';    // Demo: Always show 0
-  elTurbidity.textContent = '0.0';  // Demo: Always show 0
-  elTDS.textContent = latest.tds != null && latest.tds > 0 ? latest.tds.toFixed(0) : '0';  // Real TDS data
-  elTemp.textContent = '0.0'; // Demo: Always show 0
+  // แสดงค่าเป็น ppm พร้อมจำกัดทศนิยม
+  elEC.textContent = latest.ec != null ? latest.ec.toFixed(1) : NIL;
+  elPH.textContent = latest.ph != null ? latest.ph.toFixed(1) : NIL;
+  elN.textContent = latest.n != null ? latest.n.toFixed(1) : NIL;
+  elP.textContent = latest.p != null ? latest.p.toFixed(1) : NIL;
+  elK.textContent = latest.k != null ? latest.k.toFixed(1) : NIL;
+  elMOI.textContent = latest.moi ?? NIL;
+  if (latest.bat != null) {
+    const pct = Math.max(0, Math.min(100, latest.bat));
+    const txt = `${Math.round(pct)}%`;
+    if (elBAT) elBAT.textContent = txt;            // header icon text
+    if (elBatteryValue) elBatteryValue.textContent = txt; // KPI numeric
+    if (elBatFill) {
+      elBatFill.className = 'battery-fill';
+      elBatFill.style.width = pct + '%';
+      if (pct < 15) {
+        elBatFill.classList.add('low', 'blink');
+      } else if (pct < 50) {
+        elBatFill.classList.add('mid');
+      } else {
+        // high -> default green
+      }
+    }
+  } else {
+    if (elBAT) elBAT.textContent = NIL;
+    if (elBatteryValue) elBatteryValue.textContent = NIL;
+    if (elBatFill) {
+      elBatFill.className = 'battery-fill missing';
+      elBatFill.style.width = '8%';
+    }
+  }
   elRSSI.textContent = (latest.rssi ?? NIL);
   elSNR.textContent = (latest.snr ?? NIL);
   elDev.textContent = latest.device || NIL;
 }
 function updateSummary(rows) {
-  // Demo version: Show only EC and TDS metrics
-  const metrics = ['ec', 'tds'];
+  // Base metrics order
+  let metrics = ['ec', 'ph', 'n', 'p', 'k', 'moi', 'bat'];
+  // If mobile viewport (<=640px) omit battery summary card per requirement
+  try {
+    if (window.matchMedia && window.matchMedia('(max-width:640px)').matches) {
+      metrics = metrics.filter(m => m !== 'bat');
+    }
+  } catch { }
   summaryGrid.innerHTML = '';
   if (!rows.length) {
     summaryGrid.innerHTML = '<div class="card" style="color:var(--muted)">ไม่มีข้อมูลในช่วงที่เลือก</div>';
     return;
   }
   metrics.forEach(metric => {
-    const values = rows.map(r => r[metric]).filter(v => v !== null && !isNaN(v) && v > 0);
-    if (!values.length) {
-      // Show zero values for metrics with no data
-      summaryGrid.insertAdjacentHTML('beforeend', `<div class="card"><div class="t">${metric.toUpperCase()}</div><div style=\"font-size:14px; margin-top:4px;\">Avg: <span class=\"v\">0</span></div><div class=\"t\">Min: 0</div><div class=\"t\">Max: 0</div></div>`);
-      return;
-    }
+    const values = rows.map(r => r[metric]).filter(v => v !== null && !isNaN(v));
+    if (!values.length) return;
     const sum = values.reduce((a, b) => a + b, 0);
     const avg = sum / values.length;
     const min = Math.min(...values);
     const max = Math.max(...values);
-    
-    // Format values for EC and TDS (both are integers)
-    const fmtVal = v => v.toFixed(0);
-    
+    const isBat = metric === 'bat';
+    const fmtVal = v => isBat ? `${v.toFixed(2)}%` : v.toFixed(2);
     summaryGrid.insertAdjacentHTML('beforeend', `<div class="card"><div class="t">${metric.toUpperCase()}</div><div style=\"font-size:14px; margin-top:4px;\">Avg: <span class=\"v\">${fmtVal(avg)}</span></div><div class=\"t\">Min: ${fmtVal(min)}</div><div class=\"t\">Max: ${fmtVal(max)}</div></div>`);
   });
 }
@@ -234,13 +274,13 @@ function updateTable(rows) {
     <tr>
       <td>${fmtTime(r.ts)}</td>
       <td>${r.device || ''}</td>
-      <td>0.00</td>
-      <td>${r.ec != null && r.ec > 0 ? r.ec.toFixed(0) : '0'}</td>
-      <td>0.00</td>
-      <td>0</td>
-      <td>0.0</td>
-      <td>${r.tds != null && r.tds > 0 ? r.tds.toFixed(0) : '0'}</td>
-      <td>0.0</td>
+      <td>${r.ec != null ? r.ec.toFixed(1) : ''}</td>
+      <td>${r.ph != null ? r.ph.toFixed(1) : ''}</td>
+      <td>${r.n != null ? r.n.toFixed(1) : ''}</td>
+      <td>${r.p != null ? r.p.toFixed(1) : ''}</td>
+      <td>${r.k != null ? r.k.toFixed(1) : ''}</td>
+      <td>${r.moi != null ? r.moi.toFixed(1) : ''}</td>
+      <td>${r.bat != null ? Math.round(r.bat) + '%' : ''}</td>
     </tr>`).join('');
 }
 // ตรวจสอบว่าข้อมูลเป็นของวันนี้หรือไม่
@@ -255,70 +295,7 @@ function isShowingTodayData() {
          (!startDate && endDate === today);
 }
 
-function makeChart(ctx) { 
-  const colors = { 
-    ph: '#e45756', 
-    ec: '#1f77b4', 
-    do: '#54a24b', 
-    orp: '#f2af58', 
-    turbidity: '#72b7b2', 
-    tds: '#4c78a8', 
-    temp: '#b279a2' 
-  }; 
-  return new Chart(ctx, { 
-    type: 'line', 
-    data: { 
-      labels: [], 
-      datasets: [
-        // Demo: Hide pH (set to 0, gray color, thin line)
-        { label: 'pH', borderColor: '#ccc', backgroundColor: '#ccc', data: [], tension: .25, borderWidth: 1, hidden: true }, 
-        // Demo: Highlight EC with real data (thick line, bright color)
-        { label: 'EC (µS/cm)', borderColor: colors.ec, backgroundColor: colors.ec, data: [], tension: .25, borderWidth: 3 }, 
-        // Demo: Hide DO (set to 0, gray color, thin line)
-        { label: 'DO (mg/L)', borderColor: '#ccc', backgroundColor: '#ccc', data: [], tension: .25, borderWidth: 1, hidden: true }, 
-        // Demo: Hide ORP (set to 0, gray color, thin line)
-        { label: 'ORP (mV)', borderColor: '#ccc', backgroundColor: '#ccc', data: [], tension: .25, borderWidth: 1, hidden: true }, 
-        // Demo: Hide Turbidity (set to 0, gray color, thin line)
-        { label: 'Turbidity (NTU)', borderColor: '#ccc', backgroundColor: '#ccc', data: [], tension: .25, borderWidth: 1, hidden: true }, 
-        // Demo: Highlight TDS with real data (thick line, bright color)
-        { label: 'TDS (ppm)', borderColor: colors.tds, backgroundColor: colors.tds, data: [], tension: .25, borderWidth: 3 }, 
-        // Demo: Hide Temp (set to 0, gray color, thin line)
-        { label: 'Temp (°C)', borderColor: '#ccc', backgroundColor: '#ccc', data: [], tension: .25, borderWidth: 1, hidden: true }
-      ] 
-    }, 
-    options: { 
-      responsive: true, 
-      maintainAspectRatio: false, 
-      interaction: { mode: 'nearest', intersect: false }, 
-      plugins: { 
-        legend: { 
-          labels: { 
-            color: '#111', 
-            usePointStyle: true, 
-            pointStyle: 'circle', 
-            pointRadius: 4, 
-            boxWidth: 10, 
-            boxHeight: 10 
-          } 
-        }, 
-        tooltip: { 
-          callbacks: { 
-            title: function (context) { 
-              const dataIndex = context[0].dataIndex; 
-              const timeLabel = CHART.data.meta && CHART.data.meta[dataIndex] ? CHART.data.meta[dataIndex] : context[0].label; 
-              const deviceLabel = CHART.data.devices && CHART.data.devices[dataIndex] ? `Device: ${CHART.data.devices[dataIndex]}` : ''; 
-              return deviceLabel ? `${timeLabel}\n${deviceLabel}` : timeLabel; 
-            } 
-          } 
-        } 
-      }, 
-      scales: { 
-        x: { ticks: { color: '#444' }, grid: { color: '#ececec' } }, 
-        y: { ticks: { color: '#444' }, grid: { color: '#ececec' } } 
-      } 
-    } 
-  }); 
-}
+function makeChart(ctx) { const colors = { ec: '#1f77b4', ph: '#e45756', n: '#f2af58', p: '#72b7b2', k: '#4c78a8', moi: '#54a24b', bat: '#b279a2' }; return new Chart(ctx, { type: 'line', data: { labels: [], datasets: [{ label: 'EC', borderColor: colors.ec, backgroundColor: colors.ec, data: [], tension: .25 }, { label: 'pH', borderColor: colors.ph, backgroundColor: colors.ph, data: [], tension: .25 }, { label: 'N', borderColor: colors.n, backgroundColor: colors.n, data: [], tension: .25 }, { label: 'P', borderColor: colors.p, backgroundColor: colors.p, data: [], tension: .25 }, { label: 'K', borderColor: colors.k, backgroundColor: colors.k, data: [], tension: .25 }, { label: 'MOI', borderColor: colors.moi, backgroundColor: colors.moi, data: [], tension: .25 }, { label: 'BAT', borderColor: colors.bat, backgroundColor: colors.bat, data: [], tension: .25 },] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { labels: { color: '#111', usePointStyle: true, pointStyle: 'circle', pointRadius: 4, boxWidth: 10, boxHeight: 10 } }, tooltip: { callbacks: { title: function (context) { const dataIndex = context[0].dataIndex; const timeLabel = CHART.data.meta && CHART.data.meta[dataIndex] ? CHART.data.meta[dataIndex] : context[0].label; const deviceLabel = CHART.data.devices && CHART.data.devices[dataIndex] ? `Device: ${CHART.data.devices[dataIndex]}` : ''; return deviceLabel ? `${timeLabel}\n${deviceLabel}` : timeLabel; } } } }, scales: { x: { ticks: { color: '#444' }, grid: { color: '#ececec' } }, y: { ticks: { color: '#444' }, grid: { color: '#ececec' } } } } }); }
 function updateChart(rows) { 
   // ตรวจสอบว่าเป็นข้อมูลวันนี้หรือไม่เพื่อเลือกรูปแบบการแสดงผล
   const isTodayData = isShowingTodayData();
@@ -340,13 +317,13 @@ function updateChart(rows) {
   CHART.data.labels = labels; 
   CHART.data.meta = timeLabels; 
   CHART.data.devices = deviceLabels; 
-  CHART.data.datasets[0].data = pick('ph'); 
-  CHART.data.datasets[1].data = pick('ec'); 
-  CHART.data.datasets[2].data = pick('do'); 
-  CHART.data.datasets[3].data = pick('orp'); 
-  CHART.data.datasets[4].data = pick('turbidity'); 
-  CHART.data.datasets[5].data = pick('tds'); 
-  CHART.data.datasets[6].data = pick('temp'); 
+  CHART.data.datasets[0].data = pick('ec'); 
+  CHART.data.datasets[1].data = pick('ph'); 
+  CHART.data.datasets[2].data = pick('n'); 
+  CHART.data.datasets[3].data = pick('p'); 
+  CHART.data.datasets[4].data = pick('k'); 
+  CHART.data.datasets[5].data = pick('moi'); 
+  CHART.data.datasets[6].data = pick('bat'); 
   CHART.update('none'); 
 }
 
@@ -366,16 +343,16 @@ function exportCSVRange(startISO, endISO) {
       return true;
     });
   }
-  const header = ['Time', 'Device', 'pH', 'EC(µS/cm)', 'DO(mg/L)', 'ORP(mV)', 'Turbidity(NTU)', 'TDS(ppm)', 'Temp(°C)'];
+  const header = ['Time', 'Device', 'EC(ppm)', 'pH', 'N(ppm)', 'P(ppm)', 'K(ppm)', 'MOI(%)', 'BAT(%)'];
   const lines = [header.join(',')].concat(rows.map(r => [
     fmtTime(r.ts), r.device || '', 
-    '0.00',  // Demo: pH always 0
-    r.ec != null && r.ec > 0 ? r.ec.toFixed(0) : '0',  // Real EC data
-    '0.00',  // Demo: DO always 0
-    '0',     // Demo: ORP always 0
-    '0.0',   // Demo: Turbidity always 0
-    r.tds != null && r.tds > 0 ? r.tds.toFixed(0) : '0',  // Real TDS data
-    '0.0'    // Demo: Temp always 0
+    r.ec != null ? r.ec.toFixed(1) : '', 
+    r.ph != null ? r.ph.toFixed(1) : '', 
+    r.n != null ? r.n.toFixed(1) : '', 
+    r.p != null ? r.p.toFixed(1) : '', 
+    r.k != null ? r.k.toFixed(1) : '', 
+    r.moi != null ? r.moi.toFixed(1) : '', 
+    (r.bat != null ? r.bat.toFixed(1) : '')
   ].map(v => { const s = (v ?? '').toString(); return s.includes(',') ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
@@ -383,7 +360,7 @@ function exportCSVRange(startISO, endISO) {
   const dev = device || 'all';
   const sn = startISO ? dayjs(startISO).format('YYYY-MM-DD_HH-mm') : (startDateFilter.value || 'start');
   const en = endISO ? dayjs(endISO).format('YYYY-MM-DD_HH-mm') : (endDateFilter.value || 'end');
-  a.download = `water-quality-${dev}-${sn}_to_${en}.csv`;
+  a.download = `smfarm-${dev}-${sn}_to_${en}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -398,6 +375,18 @@ async function refresh() { const baseLimit = Number(ddPoints.value || 100); cons
   updateKPIs(rows[0]); 
   updateChart(rows.slice(0, baseLimit)); 
   updateSummary(rows.slice(0, baseLimit)); updateTable(rows);
+
+  // Advisor uses its own device selection
+  const advisorDeviceVal = ddAdvisorDevice ? ddAdvisorDevice.value : null;
+  const advisorRows = filterRows(advisorDeviceVal);
+  const forBase = advisorRows.slice(0, baseLimit);
+  const cards = evaluateSoil(advisorRows[0], forBase);
+  renderAdvisor(cards);
+  // Update advisor device label if present
+  if (elAdvisorDeviceName) {
+    const name = advisorDeviceVal ? advisorDeviceVal : 'ทั้งหมด';
+    elAdvisorDeviceName.textContent = name;
+  }
 }
 function startAuto() { if (timer) clearInterval(timer); timer = setInterval(refresh, REFRESH_SEC * 1000); }
 
@@ -465,8 +454,385 @@ window.addEventListener('DOMContentLoaded', async () => {
     // ESC to close
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('show-tools')) closeMenu(); });
   }
+    // Keep advisor device selector in sync with main device filter
+    if (ddAdvisorDevice) {
+      ddAdvisorDevice.addEventListener('change', () => {
+        // Change advisor analysis only
+        refresh();
+        showToast(ddAdvisorDevice.value ? `AI Advisor: ${ddAdvisorDevice.value}` : 'AI Advisor: ทั้งหมด');
+      });
+    }
   await refresh(); startAuto();
 });
 
-    // Return default "no data" cards for all parameters
+// ==== Config (ค่าเริ่มต้น แก้ได้ภายหลังผ่าน UI) ====
+const TARGETS = {
+  // pH.ok = 5.5–6.0 ; pH.warnLow <5.5 ; pH.warnHigh >6.5
+  ph: { okMin: 5.5, okMax: 6.0, warnHigh: 6.5 },
+  // EC: แปลงเป็น ppm แล้ว - ค่าประมาณสำหรับกาแฟ
+  ec: { warn_ppm: 1280, alert_ppm: 2560, water_max_ppm: 960 }, // ec(ppm) = dS/m × 640
+  // MOI.target = 60–80% ; MOI.refill_at ≈ 50%
+  moi: { okMinPct: 60, okMaxPct: 80, refillPct: 50 },
+  // N/P/K ในหน่วย ppm (แปลงจาก mg/kg เป็น ppm: 1 mg/kg ≈ 1 ppm สำหรับน้ำ)
+  // N (NO3-N, ppm; แปลงจากข้อมูล Google Sheets)
+  n: { action_lt: 10, warn_lt: 20 }, // <10 ACTION, 10–20 WARN, >20 OK (ppm)
+  // P (ppm; แปลงจากข้อมูล Google Sheets)
+  p: { action_lt: 30, warn_lt: 60, ok_hi: 80, warn_high_gt: 100 }, // <30 ACTION, 30–60 WARN, 60–80 OK, 80–100 WARN(ค่อนข้างสูง), >100 WARN สูง (ppm)
+  // K (ppm; แปลงจากข้อมูล Google Sheets - แปลงจาก cmol(+)/kg)
+  // สำหรับ K: 1 cmol(+)/kg ≈ 391 ppm K (ประมาณ)
+  k: { action_lt: 117, warn_lt: 196, ok_hi: 391, warn_high_gt: 587 } // แปลงจาก cmol(+)/kg เป็น ppm
+};
 
+// ยูทิลขั้นต่ำ
+const pct = (v) => Number.isFinite(v) ? Math.round(v * 100) + '%' : '–';
+const percentile = (arr, p) => { arr = arr.filter(x => Number.isFinite(x)).sort((a, b) => a - b); if (!arr.length) return null; const i = (arr.length - 1) * p; const lo = Math.floor(i), hi = Math.ceil(i); return lo === hi ? arr[lo] : arr[lo] + (arr[hi] - arr[lo]) * (i - lo); };
+
+// ประเมินข้อมูลล่าสุดเทียบกับฐาน 30 วัน/หรือ N จุดล่าสุด
+function evaluateSoil(latest, rows) {
+  const cards = [];
+  if (!latest) {
+    // Return default "no data" cards for all parameters
+    ['N', 'P', 'K', 'EC', 'MOI', 'pH'].forEach(param => {
+      cards.push({
+        key: param.toLowerCase(),
+        level: 'warn',
+        title: `${param} ไม่มีข้อมูล`,
+        message: 'ไม่พบข้อมูลล่าสุด',
+        why: 'ไม่สามารถประเมินสภาพดินได้',
+        actions: []
+      });
+    });
+    return cards;
+  }
+
+  // เตรียมฐาน 30 วัน (ชุดที่โชว์บนกราฟ/ฟิลเตอร์แล้ว)
+  const base = rows.slice(0, 300); // พอประมาณ
+  const baseStat = m => {
+    const v = base.map(r => r[m]).filter(Number.isFinite);
+    return { med: percentile(v, 0.5) };
+  };
+
+  // --- N/P/K (absolute thresholds) ---
+  // N (ppm; แปลงจาก mg/L เป็น equivalent total ppm แล้ว)
+  (function () {
+    const key = 'n';
+    const val = latest[key];
+    if (!Number.isFinite(val)) {
+      cards.push({ key, level: 'warn', title: 'N ไม่มีข้อมูล', message: 'ไม่พบข้อมูลล่าสุด', why: 'ไม่สามารถประเมินระดับธาตุได้', actions: [] });
+      return;
+    }
+    if (val < TARGETS.n.action_lt) {
+      cards.push({
+        key, level: 'action', title: 'N ต่ำ',
+        message: `N ${val.toFixed(1)} ppm < ${TARGETS.n.action_lt} ppm`,
+        why: 'ไนโตรเจนต่ำ กระทบการเจริญเติบโต',
+        actions: ['ยูเรีย 46-0-0', 'แอมโมเนียมซัลเฟต 21-0-0']
+      });
+    } else if (val < TARGETS.n.warn_lt) {
+      cards.push({
+        key, level: 'warn', title: 'N ค่อนข้างต่ำ',
+        message: `N ${val.toFixed(1)} ppm อยู่ในช่วง 10–20 ppm`,
+        why: 'เฝ้าระวัง อาจเริ่มขาด',
+        actions: ['ปรับแผนใส่ปุ๋ย N', 'ตรวจซ้ำ']
+      });
+    } else {
+      cards.push({
+        key, level: 'ok', title: 'N ปกติ',
+        message: `N ${val.toFixed(1)} ppm อยู่ในช่วงเหมาะสม (> 20 ppm)`,
+        why: 'สุขภาพดินในส่วน N ดีแล้ว',
+        actions: []
+      });
+    }
+  })();
+
+  // P (ppm; แปลงจาก mg/L เป็น equivalent total ppm แล้ว)
+  (function () {
+    const key = 'p';
+    const val = latest[key];
+    if (!Number.isFinite(val)) {
+      cards.push({ key, level: 'warn', title: 'P ไม่มีข้อมูล', message: 'ไม่พบข้อมูลล่าสุด', why: 'ไม่สามารถประเมินระดับธาตุได้', actions: [] });
+      return;
+    }
+    if (val < TARGETS.p.action_lt) {
+      cards.push({
+        key, level: 'action', title: 'P ต่ำ',
+        message: `P ${val.toFixed(1)} ppm < ${TARGETS.p.action_lt} ppm`,
+        why: 'ฟอสฟอรัสต่ำ กระทบราก/การออกดอก',
+        actions: ['TSP 0-46-0', 'หินฟอสเฟต', 'เพิ่มอินทรียวัตถุ']
+      });
+    } else if (val < TARGETS.p.warn_lt) {
+      cards.push({
+        key, level: 'warn', title: 'P ค่อนข้างต่ำ',
+        message: `P ${val.toFixed(1)} ppm อยู่ในช่วง 30–60 ppm`,
+        why: 'ควรเฝ้าระวังและวางแผนเติม',
+        actions: ['ปรับอัตรา P', 'ตรวจซ้ำ']
+      });
+    } else if (val <= TARGETS.p.ok_hi) {
+      cards.push({
+        key, level: 'ok', title: 'P ปกติ',
+        message: `P ${val.toFixed(1)} ppm อยู่ในช่วงเป้าหมาย 60–80 ppm`,
+        why: 'สุขภาพดินในส่วน P ดีแล้ว',
+        actions: []
+      });
+    } else if (val > TARGETS.p.warn_high_gt) {
+      cards.push({
+        key, level: 'warn', title: 'P สูง',
+        message: `P ${val.toFixed(1)} ppm > ${TARGETS.p.warn_high_gt} ppm`,
+        why: 'P สูงอาจรบกวนการดูดจุลธาตุ',
+        actions: ['เว้น/ลดปุ๋ย P', 'เพิ่มอินทรียวัตถุ', 'ตรวจ Zn/Fe']
+      });
+    } else {
+      // 80–100 ppm
+      cards.push({
+        key, level: 'warn', title: 'P ค่อนข้างสูง',
+        message: `P ${val.toFixed(1)} ppm อยู่ในช่วง 80–100 ppm`,
+        why: 'ใกล้ช่วงสูง ควรเฝ้าระวังการสะสม',
+        actions: ['ลดอัตรา P', 'ตรวจซ้ำ']
+      });
+    }
+  })();
+
+  // K (ppm; แปลงจาก mg/L เป็น equivalent total ppm แล้ว)
+  (function () {
+    const key = 'k';
+    const val = latest[key];
+    if (!Number.isFinite(val)) {
+      cards.push({ key, level: 'warn', title: 'K ไม่มีข้อมูล', message: 'ไม่พบข้อมูลล่าสุด', why: 'ไม่สามารถประเมินระดับธาตุได้', actions: [] });
+      return;
+    }
+    if (val < TARGETS.k.action_lt) {
+      cards.push({
+        key, level: 'action', title: 'K ต่ำ',
+        message: `K ${val.toFixed(1)} ppm < ${TARGETS.k.action_lt} ppm`,
+        why: 'โพแทสเซียมต่ำ กระทบคุณภาพผลผลิต',
+        actions: ['K₂SO₄ 0-0-50', 'เพิ่มอินทรียวัตถุ']
+      });
+    } else if (val < TARGETS.k.warn_lt) {
+      cards.push({
+        key, level: 'warn', title: 'K ค่อนข้างต่ำ',
+        message: `K ${val.toFixed(1)} ppm อยู่ในช่วง 117–196 ppm`,
+        why: 'ควรเฝ้าระวังและวางแผนเติม',
+        actions: ['ปรับอัตรา K', 'ตรวจซ้ำ']
+      });
+    } else if (val <= TARGETS.k.ok_hi) {
+      cards.push({
+        key, level: 'ok', title: 'K ปกติ',
+        message: `K ${val.toFixed(1)} ppm อยู่ในช่วงเป้าหมาย 196–391 ppm`,
+        why: 'สุขภาพดินในส่วน K ดีแล้ว',
+        actions: []
+      });
+    } else if (val > TARGETS.k.warn_high_gt) {
+      cards.push({
+        key, level: 'warn', title: 'K สูง',
+        message: `K ${val.toFixed(1)} ppm > ${TARGETS.k.warn_high_gt} ppm`,
+        why: 'K สูงอาจเพิ่มความเค็ม/เสียสมดุลแคตไอออน',
+        actions: ['เว้นปุ๋ย KCl', 'พิจารณา leaching', 'เพิ่มอินทรียวัตถุ']
+      });
+    } else {
+      // 391–587 ppm
+      cards.push({
+        key, level: 'warn', title: 'K ค่อนข้างสูง',
+        message: `K ${val.toFixed(1)} ppm อยู่ในช่วง 391–587 ppm`,
+        why: 'ใกล้ช่วงสูง เฝ้าระวังความเค็ม/สมดุลแคตไอออน',
+        actions: ['ลดอัตรา K', 'ตรวจซ้ำ']
+      });
+    }
+  })();
+
+  // --- EC (ppm; แปลงแล้ว) ---
+  if (!Number.isFinite(latest.ec)) {
+    cards.push({
+      key: 'ec',
+      level: 'warn',
+      title: 'EC ไม่มีข้อมูล',
+      message: 'ไม่พบข้อมูลความเค็มล่าสุด',
+      why: 'ไม่สามารถประเมินระดับเกลือในดินได้',
+      actions: []
+    });
+  } else {
+    const ppm = latest.ec;
+    if (ppm >= TARGETS.ec.alert_ppm) {
+      cards.push({
+        key: 'ec',
+        level: 'action',
+        title: 'ความเค็มดินสูง',
+        message: `EC ${ppm.toFixed(1)} ppm ≥ ${TARGETS.ec.alert_ppm} ppm`,
+        why: `เกลือสูงลดศักย์น้ำพืช → เครียด (น้ำชลประทานควรไม่เกิน ${TARGETS.ec.water_max_ppm} ppm)`,
+        actions: ['ล้างเกลือ (leaching)', 'ปรับรอบให้น้ำ/ระบายน้ำ', 'เลี่ยง KCl → ใช้ K₂SO₄']
+      });
+    } else if (ppm >= TARGETS.ec.warn_ppm) {
+      cards.push({
+        key: 'ec',
+        level: 'warn',
+        title: 'ความเค็มเริ่มสูง',
+        message: `EC ${ppm.toFixed(1)} ppm`,
+        why: `เฝ้าระวังการสะสมเกลือ (น้ำชลประทานควรไม่เกิน ${TARGETS.ec.water_max_ppm} ppm)`,
+        actions: ['ตรวจคุณภาพน้ำ', 'ลดใส่ปุ๋ยเค็ม', 'เพิ่มอินทรียวัตถุ']
+      });
+    } else {
+      cards.push({
+        key: 'ec',
+        level: 'ok',
+        title: 'ความเค็มปกติ',
+        message: `EC ${ppm.toFixed(1)} ppm อยู่ในช่วงเหมาะสม`,
+        why: `สุขภาพดินในส่วน EC ดีแล้ว (อ้างอิงน้ำชลประทาน ≤ ${TARGETS.ec.water_max_ppm} ppm)`,
+        actions: []
+      });
+    }
+  }
+
+  // --- MOI: target 60–80% (ของ FC), เติมน้ำที่ ~50%
+  if (!Number.isFinite(latest.moi)) {
+    cards.push({
+      key: 'moi',
+      level: 'warn',
+      title: 'MOI ไม่มีข้อมูล',
+      message: 'ไม่พบข้อมูลความชื้นล่าสุด',
+      why: 'ไม่สามารถประเมินระดับความชื้นดินได้',
+      actions: []
+    });
+  } else {
+    const v = latest.moi; // สมมติค่าเป็น % ของ FC
+    if (v <= TARGETS.moi.refillPct) {
+      cards.push({
+        key: 'moi',
+        level: 'action',
+        title: 'ถึงจุดต้องให้น้ำ',
+        message: `MOI ${v}% ≤ ${TARGETS.moi.refillPct}% (ควรเติมน้ำ)`,
+        why: 'ความชื้นต่ำกว่าเกณฑ์เติมน้ำ เสี่ยงเครียดน้ำ',
+        actions: ['ให้น้ำ', 'คลุมดินลดการระเหย']
+      });
+    } else if (v < TARGETS.moi.okMinPct) {
+      cards.push({
+        key: 'moi',
+        level: 'warn',
+        title: 'ดินค่อนข้างแห้ง',
+        message: `MOI ${v}% < ช่วงเป้าหมาย ${TARGETS.moi.okMinPct}–${TARGETS.moi.okMaxPct}%`,
+        why: 'ใกล้เกณฑ์เติมน้ำ ควรเฝ้าระวัง',
+        actions: ['ตรวจวัดบ่อยขึ้น', 'ปรับรอบให้น้ำ']
+      });
+    } else if (v > TARGETS.moi.okMaxPct) {
+      cards.push({
+        key: 'moi',
+        level: 'warn',
+        title: 'ดินชื้นเกิน',
+        message: `MOI ${v}% > ช่วงเป้าหมาย ${TARGETS.moi.okMinPct}–${TARGETS.moi.okMaxPct}%`,
+        why: 'อากาศในดินต่ำ เสี่ยงรากขาดอากาศ',
+        actions: ['ลดรอบให้น้ำ', 'ปรับระบายน้ำ']
+      });
+    } else {
+      cards.push({
+        key: 'moi',
+        level: 'ok',
+        title: 'ความชื้นปกติ',
+        message: `MOI ${v}% อยู่ในช่วงเป้าหมาย ${TARGETS.moi.okMinPct}–${TARGETS.moi.okMaxPct}%`,
+        why: 'สุขภาพดินในส่วนความชื้นดีแล้ว',
+        actions: []
+      });
+    }
+  }
+
+  // --- pH ---
+  if (!Number.isFinite(latest.ph)) {
+    cards.push({
+      key: 'ph',
+      level: 'warn',
+      title: 'pH ไม่มีข้อมูล',
+      message: 'ไม่พบข้อมูลค่า pH ล่าสุด',
+      why: 'ไม่สามารถประเมินความเป็นกรด-ด่างได้',
+      actions: []
+    });
+  } else {
+    if (latest.ph < TARGETS.ph.okMin) {
+      cards.push({
+        key: 'ph',
+        level: 'action',
+        title: 'pH กรดจัด',
+        message: `pH ${latest.ph} < ${TARGETS.ph.okMin}`,
+        why: 'กรดจัดลดการดูด P/K และจุลธาตุ',
+        actions: ['ใส่ปูนโดโลไมต์/หินปูน', 'ตรวจดินกำหนดอัตรา', 'ปรับปุ๋ยรูปแอมโมเนียม']
+      });
+    } else if (latest.ph > TARGETS.ph.warnHigh) {
+      cards.push({
+        key: 'ph',
+        level: 'warn',
+        title: 'pH ด่างไป',
+        message: `pH ${latest.ph} > ${TARGETS.ph.warnHigh}`,
+        why: 'ด่างเกินอาจตรึง P/จุลธาตุ',
+        actions: ['กำมะถันผง (S)', 'ใช้ปุ๋ยกรด (AS)', 'ตรวจดิน']
+      });
+    } else if (latest.ph <= TARGETS.ph.okMax) {
+      cards.push({
+        key: 'ph',
+        level: 'ok',
+        title: 'pH ปกติ',
+        message: `pH ${latest.ph} อยู่ในช่วงเป้าหมาย ${TARGETS.ph.okMin}–${TARGETS.ph.okMax}`,
+        why: 'สุขภาพดินในส่วน pH ดีแล้ว',
+        actions: []
+      });
+    } else {
+      // ค่ากลาง 6.0–6.5: ใช้เตือนอ่อน ๆ ให้เฝ้าระวัง
+      cards.push({
+        key: 'ph',
+        level: 'warn',
+        title: 'pH ค่อนข้างด่าง',
+        message: `pH ${latest.ph} > ${TARGETS.ph.okMax} แต่ยังไม่เกิน ${TARGETS.ph.warnHigh}`,
+        why: 'ใกล้ขอบบนของช่วงที่เหมาะสม ควรเฝ้าระวัง',
+        actions: ['ตรวจวัดสม่ำเสมอ', 'หลีกเลี่ยงปุ๋ยที่เพิ่ม pH']
+      });
+    }
+  }
+
+  return cards;
+}
+
+// เรนเดอร์การ์ดคำแนะนำ
+function renderAdvisor(cards) {
+  const el = document.getElementById('advisor');
+  if (!el) return;
+
+  const missingCard = (key) => ({
+    key,
+    level: 'warn',
+    title: `${key.toUpperCase()} ไม่มีข้อมูล`,
+    message: 'ไม่พบข้อมูลล่าสุด',
+    why: 'ไม่สามารถประเมินได้',
+    actions: []
+  });
+
+  const getCard = (key) => cards.find(c => c && c.key === key) || missingCard(key);
+
+  // ใช้ breakpoint เดียวกับส่วนอื่น (<=640px)
+  let isMobile = false;
+  try {
+    isMobile = !!(window.matchMedia && window.matchMedia('(max-width:640px)').matches);
+  } catch {}
+
+  // จัดแถว: แถว1 N & EC, แถว2 P & pH, แถว3 K & MOI
+  const rows = [
+    ['n', 'ec'],
+    ['p', 'ph'],
+    ['k', 'moi']
+  ];
+
+  const cardTpl = (card) => `
+    <div class="card ${card.level}">
+      <div>
+        <div><strong>${card.title}</strong> — ${card.message}</div>
+        <div class="why">${card.why}</div>
+        ${(!isMobile && card.actions?.length) ? `<div class="chips">${card.actions.map(a => `<span class="chip">${a}</span>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
+
+  const html = rows.map(pair => {
+    const left = getCard(pair[0]);
+    const right = getCard(pair[1]);
+    return `
+      <div class="advisor-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        ${cardTpl(left)}
+        ${cardTpl(right)}
+      </div>`;
+  }).join('');
+
+  el.innerHTML = html;
+}

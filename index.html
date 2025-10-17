@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Water Quality Monitor</title>
+  <title>Coffee Smart Farm</title>
 
   <!-- Favicon -->
   <link rel="shortcut icon" type="image/x-icon" href="icon.ico">
@@ -23,7 +23,7 @@
   <script>
     (function () {
       try {
-        const saved = localStorage.getItem('water-quality-theme') || 'light';
+        const saved = localStorage.getItem('smfarm-theme') || 'light';
         document.documentElement.setAttribute('data-theme', saved);
       } catch { }
     })();
@@ -41,8 +41,7 @@
     <!-- Header -->
     <div class="header">
       <div class="brand">
-        <strong style="font-size:18px;">💧 Water Quality Monitor</strong>
-        <span class="badge" style="background:#f59e0b; color:white; font-weight:600;">DEMO</span>
+        <strong style="font-size:18px;">🌱 Coffee Smart Farm</strong>
         <span class="badge" id="updated">–</span>
       </div>
       <button class="hamburger" id="menuToggle" type="button" aria-label="เมนูด่วน" aria-expanded="false"
@@ -92,42 +91,48 @@
 
     <!-- KPIs -->
     <div class="section">
-      <h2>Water Quality Parameters</h2>
-      <small style="color:var(--muted); font-style:italic;">Demo Version: แสดงเฉพาะค่า EC และ TDS ค่าอื่นเป็น 0</small>
+      <h2>KPIs</h2>
+      <div class="battery-icon header-battery kpi-heading-battery" title="Battery" style="margin-left:8px;">
+        <div class="battery-body">
+          <div class="battery-fill" id="batteryFill"></div>
+          <span class="battery-text" id="bat">–</span>
+        </div>
+        <div class="battery-cap"></div>
+      </div>
       <div class="rule"></div>
     </div>
     <div class="kpis">
-      <!-- Row 1: pH | EC -->
+      <!-- Row 1: EC | MOI -->
+      <div class="card kpi">
+        <div class="name">EC (ppm)</div>
+        <div class="val" id="ec">–</div>
+      </div>
+      <div class="card kpi">
+        <div class="name">MOI (%)</div>
+        <div class="val" id="moi">–</div>
+      </div>
+      <!-- Row 2: N | pH -->
+      <div class="card kpi">
+        <div class="name">N (ppm)</div>
+        <div class="val" id="n">–</div>
+      </div>
       <div class="card kpi">
         <div class="name">pH</div>
         <div class="val" id="ph">–</div>
       </div>
+      <!-- Row 3: P | Battery -->
       <div class="card kpi">
-        <div class="name">EC (µS/cm)</div>
-        <div class="val" id="ec">–</div>
+        <div class="name">P (ppm)</div>
+        <div class="val" id="p">–</div>
       </div>
-      <!-- Row 2: DO | ORP -->
-      <div class="card kpi">
-        <div class="name">DO (mg/L)</div>
-        <div class="val" id="do">–</div>
+      <div class="card kpi battery-kpi">
+        <div class="name">Battery</div>
+        <div class="val" id="batteryValue">–</div>
       </div>
+      <!-- Row 4: K | Signal -->
       <div class="card kpi">
-        <div class="name">ORP (mV)</div>
-        <div class="val" id="orp">–</div>
-      </div>
-      <!-- Row 3: Turbidity | TDS -->
-      <div class="card kpi">
-        <div class="name">Turbidity (NTU)</div>
-        <div class="val" id="turbidity">–</div>
-      </div>
-      <div class="card kpi">
-        <div class="name">TDS (ppm)</div>
-        <div class="val" id="tds">–</div>
-      </div>
-      <!-- Row 4: Temp | Signal -->
-      <div class="card kpi">
-        <div class="name">Temp (°C)</div>
-        <div class="val" id="temp">–</div>
+        <div class="name">K (ppm)</div>
+        <div class="val" id="k">–</div>
       </div>
       <div class="card kpi">
         <div class="name">Signal</div>
@@ -149,6 +154,15 @@
       <div class="rule"></div>
     </div>
     <div class="summary" id="summaryGrid"></div>
+    <!-- AI Advisor -->
+    <div class="section">
+      <h2>AI Advisor </h2>       
+      <div class="field" data-click-focus>
+        <select id="advisorDevice" aria-label="เลือกอุปกรณ์ (AI Advisor)"></select>
+      </div>
+      <div class="rule"></div>
+    </div>
+    <div id="advisor" class="advice"></div>
 
     <!-- Table -->
     <div class="section">
@@ -161,13 +175,13 @@
           <tr>
             <th style="min-width:150px;">Time</th>
             <th>Device</th>
+            <th>EC (ppm)</th>
             <th>pH</th>
-            <th>EC (µS/cm)</th>
-            <th>DO (mg/L)</th>
-            <th>ORP (mV)</th>
-            <th>Turbidity (NTU)</th>
-            <th>TDS (ppm)</th>
-            <th>Temp (°C)</th>
+            <th>N (ppm)</th>
+            <th>P (ppm)</th>
+            <th>K (ppm)</th>
+            <th>MOI (%)</th>
+            <th>BAT (%)</th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>

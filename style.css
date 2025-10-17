@@ -85,21 +85,21 @@ html[data-theme="dark"] .chip.export:hover{filter:brightness(.94); box-shadow:0 
 @media (max-width:980px){ .kpis{grid-template-columns:repeat(2,1fr); grid-auto-rows:auto;} }
 /* Mobile: single column */
 @media (max-width:560px){ .kpis{grid-template-columns:1fr;} }
-/* Desktop specific ordering for water quality parameters:
-   Row1: pH | EC | DO | ORP
-   Row2: Turbidity | TDS | Temp | Signal */
+/* Desktop specific ordering (requested):
+   Row1: EC | N | P | K
+   Row2: MOI | pH | Battery | Signal */
 @media (min-width:981px){
   .kpis{grid-template-areas:
-    "ph ec do orp"
-    "turbidity tds temp sig";}
-  .kpis .card:nth-child(1){grid-area:ph;}         /* pH */
-  .kpis .card:nth-child(2){grid-area:ec;}         /* EC */
-  .kpis .card:nth-child(3){grid-area:do;}         /* DO */
-  .kpis .card:nth-child(4){grid-area:orp;}        /* ORP */
-  .kpis .card:nth-child(5){grid-area:turbidity;}  /* Turbidity */
-  .kpis .card:nth-child(6){grid-area:tds;}        /* TDS */
-  .kpis .card:nth-child(7){grid-area:temp;}       /* Temperature */
-  .kpis .card:nth-child(8){grid-area:sig;}        /* Signal */
+    "ec n p k"
+    "moi ph bat sig";}
+  .kpis .card:nth-child(1){grid-area:ec;}   /* EC */
+  .kpis .card:nth-child(2){grid-area:moi;}  /* MOI */
+  .kpis .card:nth-child(3){grid-area:n;}    /* N */
+  .kpis .card:nth-child(4){grid-area:ph;}   /* pH */
+  .kpis .card:nth-child(5){grid-area:p;}    /* P */
+  .kpis .card:nth-child(6){grid-area:bat;}  /* Battery */
+  .kpis .card:nth-child(7){grid-area:k;}    /* K */
+  .kpis .card:nth-child(8){grid-area:sig;}  /* Signal */
 }
 .card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px; box-shadow:var(--shadow);} 
 .kpi .name{font-size:12px; color:var(--muted);} 
@@ -266,4 +266,10 @@ html[data-theme="dark"] .floating-toggle:hover{background:#1a1a1a; box-shadow:0 
   html[data-theme="dark"] #quickTools .quick .chip.export{color:#fff;}
 }
 
-
+.advice { display:grid; gap:10px; }
+.advice .card { display:flex; gap:10px; border-left:4px solid var(--border); }
+.advice .card.ok    { border-left-color:#22c55e; }
+.advice .card.warn  { border-left-color:#f59e0b; }
+.advice .card.action{ border-left-color:#ef4444; }
+.advice .why{ color:var(--muted); font-size:12px; margin-top:4px; }
+.advice .chips{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
